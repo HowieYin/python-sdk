@@ -79,9 +79,12 @@ class NdjsonTransport:
             if not line:
                 continue
             try:
-                message: dict[str, Any] = json.loads(line)
+                message = json.loads(line)
             except Exception:
                 logging.exception("Error parsing JSON-RPC message")
+                continue
+            if not isinstance(message, dict):
+                logging.warning("Ignoring non-object JSON-RPC message")
                 continue
             return message
 
