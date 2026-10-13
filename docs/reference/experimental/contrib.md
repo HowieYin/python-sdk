@@ -16,7 +16,7 @@ Use it when your UI needs to merge tool call updates and retain message chunks f
 - `subscribe(callback)` lets you push snapshots into stores or UI components whenever state changes.
 - Automatic reset on session-change (toggle with `auto_reset_on_session_change`).
 
-Create one accumulator per session. It tracks tool call starts/progress, full `AgentPlanUpdate` events, current mode, available commands, and user/agent/thought chunks. Handle config options, usage, notices, compaction, and incremental plan events separately if your UI needs them.
+Create one accumulator per session. It tracks tool call starts/progress, full `AgentPlanUpdate` events, current mode, available commands, and user/agent/thought chunks. Handle session metadata, config options, usage, notices, compaction, incremental plan events, and tool names separately if your UI needs them.
 
 ## ToolCallTracker & PermissionBroker (`acp.contrib.tool_calls`, `acp.contrib.permissions`)
 

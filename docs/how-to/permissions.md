@@ -35,6 +35,8 @@ async def request_permission(
 
 Despite its Python name, `AllowedOutcome` means the user selected an option. That option can be a rejection. Read the option's `kind` to distinguish `allow_once` and `allow_always` from `reject_once` and `reject_always`. `DeniedOutcome` represents cancellation.
 
+When the client cancels a prompt turn with `session/cancel`, resolve every pending permission request for that turn with `DeniedOutcome()`. A dismissed dialog also returns that outcome. The agent must not execute the operation after a cancellation or a rejection. See the protocol's [permission outcomes](https://agentclientprotocol.com/protocol/v1/tool-calls#requesting-permission).
+
 ## Request approval from the agent
 
 The experimental contrib helpers associate a permission request with a tracked tool call. Pass your session's tracker to this function. It publishes the pending call and returns whether the user approved it; the caller performs the operation only if it returns `True`:

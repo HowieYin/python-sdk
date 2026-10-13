@@ -1,7 +1,7 @@
 # Protocol features and cancellation
 
 The default `acp` runtime uses protocol v1. This page documents the bundled
-`schema-v1.23.0` bindings on `main`. Check the peer's capabilities before using
+[`schema-v1.23.0`](https://github.com/agentclientprotocol/agent-client-protocol/blob/schema-v1.23.0/schema/v1/schema.unstable.json) bindings on `main`. The official [v1 documentation](https://agentclientprotocol.com/protocol/v1/overview) describes the protocol. Check the peer's capabilities before using
 optional methods; schema support alone does not mean a peer implements them.
 For the separate draft runtime, see [experimental v2](experimental/protocol-v2.md).
 
@@ -28,7 +28,11 @@ await client.session_update(
 
 Notices are live events, outside session history. The title must be non-empty;
 severity accepts `info`, `warning`, `error`, and custom or future strings.
-Agents must only send notices to clients that advertise support.
+Custom severity values begin with `_`; other unknown values are reserved for
+future protocol variants. Agents send notices only to clients that advertise
+support, and cannot rely on them being displayed. Severity is a presentation
+hint: an `error` notice does not fail a request or end a turn. See the
+[session-notices contract](https://agentclientprotocol.com/rfds/session-notices).
 
 Tool calls include the stable `name` field. Terminal authentication methods use
 `TerminalAuthMethod`. Accepted elicitation content validates scalar values and
@@ -69,6 +73,8 @@ Deletion removes stored session data; `close_session` only closes the active
 session. The SDK dispatches these calls to your implementation; it does not
 provide session storage or provider management itself. Implement each method
 you advertise; the interface declaration alone does not supply its behavior.
+For the session lifecycle contracts, see [session setup](https://agentclientprotocol.com/protocol/v1/session-setup)
+and [session deletion](https://agentclientprotocol.com/protocol/v1/session-delete).
 
 MCP requests return the inner JSON result unchanged, including `null`. Use
 `notify_mcp` for one-way MCP messages. Both APIs accept `connection_id`, `method`,
@@ -88,5 +94,10 @@ Cancelling the task that awaits an outgoing request raises `CancelledError`
 locally without waiting for the peer, and additionally sends a best-effort
 `$/cancel_request` for that request. When `asyncio.wait_for` times out, it cancels
 the awaiting task and raises `TimeoutError` to its caller.
-Cancellation support is optional for peers. Use `session/cancel` to stop a
-prompt turn.
+Cancellation support is optional for peers. See the protocol's
+[request-cancellation contract](https://agentclientprotocol.com/protocol/v1/cancellation).
+To stop a prompt turn, call `await connection.cancel(session_id=session_id)`.
+This sends `session/cancel` to your agent's handler; the agent stops its work
+and completes the original prompt with `stop_reason="cancelled"`. The client
+keeps handling updates until that response and returns cancellation outcomes
+for pending permission requests. See [turn cancellation](../explanation/lifecycle.md#cancel-a-turn).

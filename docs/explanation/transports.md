@@ -7,7 +7,7 @@ layer. See the [web transport guide](../reference/experimental/web-transports.md
 ## HTTP and WebSocket
 
 Start reading at `acp/http/asgi.py`. It creates Starlette routes, passes parsed
-HTTP requests to `AcpServer`, and binds WebSockets in `acp/ws/server.py`. Both use the existing
+HTTP requests to `AcpServer`, and binds WebSockets in `acp/ws/server.py`. Both use
 `AgentSideConnection` and its message-level `Transport` interface:
 
 ```text
@@ -35,6 +35,13 @@ HTTP output follows these routing rules:
 Idle SSE streams emit keepalives. These support slow readers, streams that open
 after messages arrive, and orderly teardown. `DELETE` and server shutdown close
 the HTTP connections and cancel their agent work.
+
+The transport retains connection and stream state, not conversation history.
+Reopening a transport creates a new connection; loading or resuming a session
+depends on the agent's storage and advertised capabilities. A dropped
+connection-scoped SSE stream ends the client's receive loop and rejects pending
+requests. A session stream ending does not close the whole connection. The SDK
+does not retry either stream automatically.
 
 WebSocket already provides one bidirectional stream. Its transport adapts
 Starlette's socket to JSON-RPC messages; it needs no HTTP connection registry,

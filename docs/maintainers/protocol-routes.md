@@ -5,12 +5,22 @@ truth for incoming routes. Declare routing metadata alongside each method's
 parameter model:
 
 ```python
-@param_model(
-    DeleteSessionRequest,
-    method=AGENT_METHODS["session_delete"],
-    adapt_result=normalize_result,
-)
-async def delete_session(self, session_id: str, **kwargs: Any) -> DeleteSessionResponse: ...
+from typing import Any
+
+from acp.meta import AGENT_METHODS
+from acp.schema import DeleteSessionRequest, DeleteSessionResponse
+from acp.utils import normalize_result, param_model
+
+
+class SessionHandlers:
+    @param_model(
+        DeleteSessionRequest,
+        method=AGENT_METHODS["session_delete"],
+        adapt_result=normalize_result,
+    )
+    async def delete_session(
+        self, session_id: str, **kwargs: Any
+    ) -> DeleteSessionResponse: ...
 ```
 
 `build_agent_router` and `build_client_router` read these declarations through
@@ -23,8 +33,7 @@ Optional handlers can declare `optional=True` and `default_result`.
 `ModelA | ModelB`, or `Annotated[ModelA | ModelB, Field(discriminator="type")]`.
 The router validates the original type with Pydantic's `TypeAdapter`, preserving
 `Annotated` validation metadata. Union handlers receive the fields common to all
-branches by default. The former `param_models(A, B, ...)` form is replaced by
-`param_model(A | B, ...)`.
+branches by default.
 
 `validate_params` and `adapt_params` provide custom validation and conversion
 when the wire representation differs from the Python signature, as with config

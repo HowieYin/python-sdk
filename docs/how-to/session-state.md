@@ -29,7 +29,7 @@ class StatefulClient(Client):
 
 The accumulator tracks tool call starts and progress, full `AgentPlanUpdate` entries, the current mode, available commands, and user/agent/thought message chunks. A progress event without a start creates a provisional tool call entry. A later start can replace its fields; the helper does not reconstruct event chronology.
 
-It does not retain every update type. Handle usage, config options, notices, compaction, and incremental plan events separately if your UI uses them. Message collections contain chunks; concatenate text chunks when rendering a complete message.
+It does not retain every update type or field. Handle session metadata, usage, config options, notices, compaction, incremental plan events, and tool names separately if your UI uses them. Message collections contain chunks; group by `message_id` when present and concatenate text chunks when rendering a message.
 
 `apply()` returns a snapshot; `snapshot()` reads the current one after at least one notification. The helper copies model data and freezes the outer snapshot model, but its dictionaries and nested objects remain mutable. Treat snapshots as read-only in your application.
 

@@ -80,7 +80,9 @@ async def main() -> None:
     async with spawn_agent_process(
         EchoClient(), sys.executable, str(agent_script), cwd=root
     ) as (connection, _process):
-        await connection.initialize(protocol_version=PROTOCOL_VERSION)
+        initialized = await connection.initialize(protocol_version=PROTOCOL_VERSION)
+        if initialized.protocol_version != PROTOCOL_VERSION:
+            raise RuntimeError("The agent selected an unsupported protocol version")
         session = await connection.new_session(cwd=str(root), mcp_servers=[])
         response = await connection.prompt(
             session_id=session.session_id,
@@ -106,7 +108,7 @@ Hello ACP
 Turn finished: end_turn
 ```
 
-`initialize` negotiates the protocol version. `new_session` creates a session with an absolute working directory. `prompt` sends content to that session. The agent sends response text to `session_update` and then returns a `PromptResponse` with the turn's stop reason.
+`initialize` negotiates the protocol version; this client continues only when the agent selects v1. `new_session` creates a session with an absolute working directory. `prompt` sends content to that session. The agent sends response text to `session_update` and then returns a `PromptResponse` with the turn's stop reason. See the protocol's [initialization contract](https://agentclientprotocol.com/protocol/v1/initialization).
 
 The callback accepts every update variant, but this example prints only agent text chunks. The echo agent does not request permissions; the permission handler returns a typed cancellation outcome if a request arrives. The `async with` block closes the connection and shuts down the child process when it exits. The [lifecycle explanation](../explanation/lifecycle.md) describes how these calls fit together.
 
@@ -121,13 +123,11 @@ The callback accepts every update variant, but this example prints only agent te
 
 ## Extend the agent
 
-Read [`examples/echo_agent.py`](https://github.com/agentclientprotocol/python-sdk/blob/main/examples/echo_agent.py). Its handlers negotiate initialization, create a session ID, and send an `AgentMessageChunk` for each prompt text block. Start by changing the text it sends, then run the same client to check the result.
+Read [`examples/echo_agent.py`](https://github.com/agentclientprotocol/python-sdk/blob/main/examples/echo_agent.py) for the text round trip. The [agent tutorial](agent.md) adds resource-link handling, session tracking, and turn cancellation to that structure.
 
 Follow [Build an agent](agent.md) to write your own handlers, or [Build a client](client.md) to implement callbacks and manage connections. For tool calls, see [Handle permissions](../how-to/permissions.md). The [integration patterns](../integrations/index.md) show how existing projects use the same SDK interfaces.
 
 ## Protocol and maintenance topics
-
-The following topics have their own pages:
 
 - <span id="session-notices-unstable"></span>[Session notices](../reference/protocol.md#session-notices-unstable)
 - <span id="additional-v1-protocol-methods"></span>[Additional v1 methods](../reference/protocol.md#additional-v1-protocol-methods)

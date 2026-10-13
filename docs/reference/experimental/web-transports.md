@@ -8,13 +8,16 @@ The SDK can run ACP over two remote connectivity profiles in addition to stdio:
 - **Streamable HTTP** — `POST` for client→server messages, long-lived `GET` SSE
   streams for server→client messages (one connection-scoped stream plus one per
   session), and `DELETE` to terminate. `initialize` returns `200 OK` with a JSON
-  body; all other POSTs return `202 Accepted`. **Requires HTTP/2.**
+  body; accepted post-initialization messages return `202 Accepted`. Invalid
+  HTTP requests return an error status. The transport profile requires HTTP/2.
 - **WebSocket** — a `GET` upgrade on the same endpoint carrying full-duplex
   JSON-RPC text frames, one message per frame. Binary frames are ignored, as
   the transport RFD specifies; the server logs a warning on the first one.
 
-Both reuse the existing JSON-RPC message format and ACP lifecycle
-(`initialize` → session methods → close).
+Both carry ACP JSON-RPC messages. The examples below use the v1 lifecycle
+(`initialize` → session methods → close). The
+[transport RFD](https://agentclientprotocol.com/rfds/streamable-http-websocket-transport)
+defines these profiles; the SDK's connection and routing behavior is described below.
 
 ## Installation
 
@@ -28,44 +31,79 @@ require these optional dependencies.
 
 ## Client
 
-Both transports produce a message-level `Transport` that plugs into the existing
-`connect_to_agent`:
+Both transports produce a message transport for `connect_to_agent`. Complete
+the [quickstart](../../tutorials/quickstart.md#make-the-calls-from-python) first
+to create `hello_client.py`. Save this as `web_client.py` beside it:
 
 ```python
-from acp import connect_to_agent
+import asyncio
+import sys
+from pathlib import Path
+
+from acp import PROTOCOL_VERSION, connect_to_agent
 from acp.http import create_http_stream
+from acp.schema import TextContentBlock
 from acp.ws import create_websocket_stream
 
-# Streamable HTTP
-transport = create_http_stream("http://localhost:8000/acp")
-conn = connect_to_agent(my_client, transport)
+from hello_client import EchoClient
 
-# ...or WebSocket
-transport = await create_websocket_stream("ws://localhost:8000/acp")
-conn = connect_to_agent(my_client, transport)
 
-init = await conn.initialize(protocol_version=1)
-session = await conn.new_session(cwd="/tmp", mcp_servers=[])
-await conn.prompt(session_id=session.session_id, prompt=[...])
-await conn.close()
-await transport.close()
+async def main(url: str, cwd: str) -> None:
+    if url.startswith(("ws://", "wss://")):
+        transport = await create_websocket_stream(url)
+    else:
+        transport = create_http_stream(url)
+    conn = connect_to_agent(EchoClient(), transport)
+    try:
+        initialized = await conn.initialize(protocol_version=PROTOCOL_VERSION)
+        if initialized.protocol_version != PROTOCOL_VERSION:
+            raise RuntimeError("The agent selected an unsupported protocol version")
+        session = await conn.new_session(cwd=cwd, mcp_servers=[])
+        response = await conn.prompt(
+            session_id=session.session_id,
+            prompt=[TextContentBlock(text="Hello ACP")],
+        )
+        print(f"Turn finished: {response.stop_reason}")
+    finally:
+        await conn.close()
+        await transport.close()
+
+
+if __name__ == "__main__":
+    asyncio.run(main(sys.argv[1], str(Path.cwd())))
 ```
 
-The client sends `initialize` first, reads the `Acp-Connection-Id` response
+Run it against the local server below with
+`uv run --frozen --extra http python web_client.py ws://localhost:8000/acp`.
+It prints `You said: Hello ACP` and `Turn finished: end_turn`. For a remote
+agent, pass its absolute workspace path as `cwd` instead of a local path.
+
+For Streamable HTTP, the client sends `initialize` first, reads the `Acp-Connection-Id` response
 header, then opens the connection-scoped SSE stream. When a new `sessionId`
 appears it opens that session-scoped stream too. A single SSE attempt is made per
-stream; reconnect/retry is the caller's responsibility (v1 of the RFD).
+stream; reconnect/retry is the caller's responsibility. Losing the connection
+stream ends the connection's receive loop and rejects outstanding requests.
 
 ### Loading an existing session
 
 Both HTTP and WebSocket support `load_session()` when the agent advertises
 `loadSession` and implements session persistence:
 
+Within the `try` block above, replace `new_session` with a load call after
+initialization. `saved_session_id` must identify a session retained by the
+agent, and `cwd` must match that session's working directory:
+
 ```python
-init = await conn.initialize(protocol_version=1)
-if init.agent_capabilities.load_session:
-    await conn.load_session(session_id="saved-session-id", cwd="/workspace", mcp_servers=[])
-    await conn.prompt(session_id="saved-session-id", prompt=[...])
+if (
+    initialized.agent_capabilities is None
+    or not initialized.agent_capabilities.load_session
+):
+    raise RuntimeError("The agent does not support loading sessions")
+await conn.load_session(session_id=saved_session_id, cwd=cwd, mcp_servers=[])
+response = await conn.prompt(
+    session_id=saved_session_id,
+    prompt=[TextContentBlock(text="Continue")],
+)
 ```
 
 For HTTP, history replay and the load response use the connection SSE stream.
@@ -88,10 +126,14 @@ agent's load response or automatically enable the agent's `loadSession` capabili
 ## Server
 
 The server uses Starlette for HTTP requests, responses, routing, streaming,
-WebSocket handling, and application lifespan:
+WebSocket handling, and application lifespan. Save the agent from
+[Build an agent](../../tutorials/agent.md) as `my_agent.py`, then create
+`web_server.py` beside it:
 
 ```python
 from acp.http.asgi import create_asgi_app
+
+from my_agent import MyAgent
 
 # One agent instance is created per connection.
 app = create_asgi_app(lambda conn: MyAgent())
@@ -136,40 +178,34 @@ serve ACP at the mount root (`/agents/`).
 
 For the connection registry and stream routing, see [Transport architecture](../../explanation/transports.md).
 
-### Compatibility notes
+### Server API
 
 The experimental server API uses Starlette. `create_asgi_app(agent_factory, *, path="/acp")`
 returns a Starlette application, and `AcpServer.handle_post()` and `handle_delete()`
-return Starlette response objects. `open_stream()` and `close()` retain their signatures.
+return Starlette response objects. `open_stream()` yields SSE bytes and `close()`
+closes active connections.
 
-Code using the earlier `AcpAsgiApp`, `PostResult`, `ConnectionRegistry`,
-`ConnectionState`, `AcpServer.registry`, or `create_websocket_connection()` wrappers
-must migrate to these APIs. Direct WebSocket integrations use
+Direct WebSocket integrations use
 `handle_websocket(agent_factory, websocket)` with a Starlette `WebSocket`.
 The default route is `/acp`; pass `path="/"` explicitly if you need the mount root.
 
 ### HTTP/2 server requirement
 
-> ⚠️ **Uvicorn does not serve HTTP/2.** For a spec-compliant Streamable HTTP
-> server, run an HTTP/2-capable ASGI server (**Hypercorn**, Daphne, Granian) or
-> terminate HTTP/2 at a proxy. The WebSocket profile works on Uvicorn.
+The Streamable HTTP profile requires HTTP/2 for multiplexing POST requests and
+SSE streams. Serve HTTP/2 with Hypercorn and TLS, or terminate HTTP/2 at a proxy.
+The SDK enables HTTP/2 on its default client but does not reject HTTP/1.1
+responses. Plain local HTTP can therefore exercise the SDK without satisfying
+the profile's HTTP/2 requirement. WebSocket does not need an HTTP/2 server.
 
-```python
-import asyncio
-import hypercorn.asyncio
-from hypercorn.config import Config
+Start the local WebSocket server with:
 
-config = Config()
-config.bind = ["localhost:8000"]
-config.alpn_protocols = ["h2", "http/1.1"]
-asyncio.run(hypercorn.asyncio.serve(app, config))
+```bash
+uv run --frozen --extra http --with hypercorn hypercorn web_server:app --bind localhost:8000
 ```
 
-## Examples
-
-- [`examples/http_server.py`](https://github.com/agentclientprotocol/python-sdk/blob/main/examples/http_server.py) — serve an agent over HTTP + WS (Hypercorn).
-- [`examples/http_client.py`](https://github.com/agentclientprotocol/python-sdk/blob/main/examples/http_client.py) — connect over Streamable HTTP.
-- [`examples/ws_client.py`](https://github.com/agentclientprotocol/python-sdk/blob/main/examples/ws_client.py) — connect over WebSocket.
+For HTTP/2 over TLS, supply `--certfile` and `--keyfile` for a certificate
+trusted by your client, then use an `https://` URL. See Hypercorn's
+[HTTP/2 guidance](https://hypercorn.readthedocs.io/en/latest/discussion/http2.html).
 
 ## Identity model
 
@@ -180,7 +216,11 @@ asyncio.run(hypercorn.asyncio.serve(app, config))
 - `sessionId` (JSON-RPC field) — carried in params/results and used to route
   messages to the correct stream.
 
-## Not yet supported (deferred to a future revision)
+The connection and session headers identify routing state; they are not
+authentication credentials. Authentication and authorization belong to the
+application serving the endpoint.
+
+## Unsupported transport features
 
 - `Last-Event-ID` / SSE resumability and message sequencing.
 - Client-side automatic reconnect/backoff.

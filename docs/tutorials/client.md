@@ -30,7 +30,7 @@ The quickstart's `EchoClient` subclasses `Client` and implements two methods:
 
 Use generated models rather than hand-written response dictionaries. The [permission guide](../how-to/permissions.md) explains why selecting an option is not necessarily approval. The [session state guide](../how-to/session-state.md) shows how to keep interleaved sessions separate.
 
-Your callback signatures receive snake-case fields and `**kwargs` for additional metadata. Read the [client handler reference](../reference/api.md#client-handlers) for their complete types.
+Your callback signatures receive snake-case fields. Request `_meta` entries are expanded into keyword arguments; collect those your handler does not use in `**kwargs`. Read the [client handler reference](../reference/api.md#client-handlers) for the complete types.
 
 ## Advertise the services you implement
 
