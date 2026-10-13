@@ -134,75 +134,19 @@ app = Starlette(routes=[Mount("/agents", app=acp_app)], lifespan=lifespan)
 With `path="/rpc"`, the mounted endpoint is `/agents/rpc`. Use `path="/"` to
 serve ACP at the mount root (`/agents/`).
 
-### How the server fits together
+For the connection registry and stream routing, see [Transport architecture](../../explanation/transports.md).
 
-Start reading at `acp/http/asgi.py`. It creates Starlette routes, passes parsed
-HTTP requests to `AcpServer`, and binds WebSockets in `acp/ws/server.py`. Both use the existing
-`AgentSideConnection` and its message-level `Transport` interface:
+### Compatibility notes
 
-```text
-HTTP POST → _HttpTransport incoming queue → AgentSideConnection → agent
-HTTP GET  ← StreamingResponse ← SSE buffer ← _HttpTransport.send() ← agent output
+The experimental server API uses Starlette. `create_asgi_app(agent_factory, *, path="/acp")`
+returns a Starlette application, and `AcpServer.handle_post()` and `handle_delete()`
+return Starlette response objects. `open_stream()` and `close()` retain their signatures.
 
-Starlette WebSocket ↔ _WebSocketTransport ↔ AgentSideConnection ↔ agent
-```
-
-For HTTP, `AcpServer` owns a dictionary of active connections. Each connection
-has one incoming queue and one SSE buffer per stream. The incoming queue lets
-POST return `202` while the agent handles the request. Output goes directly to
-the relevant SSE buffer; there is no intermediate transport pair or pump task.
-
-HTTP output follows these routing rules:
-
-| Message | Destination | Why |
-| --- | --- | --- |
-| `initialize` response | POST body, via one Future | Establishes the connection before GET streams open |
-| Response containing a new `sessionId` | Connection SSE stream | The client needs the ID before it can open the session stream |
-| `session/load` replay and response, `session/resume` response | Connection SSE stream | Replay precedes the response; the client gets the session ID from the original request |
-| Other messages | Session SSE stream when known, otherwise connection stream | Responses use their request's recorded session; requests/notifications carry `sessionId` |
-
-`OutboundStream` retains a bounded buffer, backpressure, and close handling.
-Idle SSE streams emit keepalives. These support slow readers, streams that open
-after messages arrive, and orderly teardown. `DELETE` and server shutdown close
-the HTTP connections and cancel their agent work.
-
-WebSocket already provides one bidirectional stream. Its transport adapts
-Starlette's socket to JSON-RPC messages; it needs no HTTP connection registry,
-session routing, SSE buffers, or multiplex mode. The ASGI handler owns the agent
-connection and closes it on socket disconnect or handler cancellation.
-
-### Simplification experiment
-
-The original 80 HTTP, WebSocket, and RPC tests passed after each ablation.
-The Starlette migration also passes these behaviors; assertions now inspect
-Starlette response objects and WebSocket tests use the framework's socket:
-
-| Stage | Removed | Lines across the three server files |
-| --- | --- | ---: |
-| Baseline | — | 715 |
-| First ablation | `ConnectionRegistry`, WebSocket multiplex mode, WebSocket pump tasks, forwarding-only ASGI method | 647 |
-| Second ablation | HTTP memory transport pair and pump, `ConnectionState`, generic response-waiter map | 581 |
-| Starlette migration | Custom ASGI app, request/header parsing, response encoding, WebSocket state tracking, `PostResult` | 483 |
-
-This measures structural simplification and regression coverage, not throughput
-or latency. Additional tests cover interrupted initialization, closing a full
-SSE buffer, WebSocket cancellation/disconnect, invalid frames, and session routing
-of concurrent success/error responses.
-
-`create_asgi_app(agent_factory, *, path="/acp")` returns a Starlette application.
-The default route is now `/acp`, replacing the earlier catch-all route.
-`AcpServer.handle_post()` and `handle_delete()` return
-Starlette responses (`status_code`, byte `body`, and case-insensitive `headers`).
-`open_stream()` and `close()` keep their signatures.
-The experimental `AcpAsgiApp` and `PostResult` wrappers were removed, along with
-`ConnectionRegistry`, `ConnectionState`, `AcpServer.registry`, and
-`create_websocket_connection()`. Direct WebSocket integrations now use
+Code using the earlier `AcpAsgiApp`, `PostResult`, `ConnectionRegistry`,
+`ConnectionState`, `AcpServer.registry`, or `create_websocket_connection()` wrappers
+must migrate to these APIs. Direct WebSocket integrations use
 `handle_websocket(agent_factory, websocket)` with a Starlette `WebSocket`.
-WebSocket lifetimes belong to their ASGI handlers; `AcpServer.close()` manages
-HTTP connections.
-
-The migration adds checks for HTTP error statuses, unsupported methods, mounting,
-lifespan cleanup, and reopening an SSE stream after disconnect.
+The default route is `/acp`; pass `path="/"` explicitly if you need the mount root.
 
 ### HTTP/2 server requirement
 
