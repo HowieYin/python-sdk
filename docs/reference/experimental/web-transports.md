@@ -1,7 +1,7 @@
 # Web Transport (Streamable HTTP & WebSocket)
 
 > **Experimental.** The remote web transports are experimental and may change.
-> They ship as an optional extra and are import-guarded.
+> Install the optional `http` extra to use them.
 
 The SDK can run ACP over two remote connectivity profiles in addition to stdio:
 
@@ -13,6 +13,10 @@ The SDK can run ACP over two remote connectivity profiles in addition to stdio:
 - **WebSocket** — a `GET` upgrade on the same endpoint carrying full-duplex
   JSON-RPC text frames, one message per frame. Binary frames are ignored, as
   the transport RFD specifies; the server logs a warning on the first one.
+  Both endpoints reply to malformed JSON with a JSON-RPC Parse Error (`-32700`),
+  and to scalar values, `null`, or an empty array or object with Invalid Request (`-32600`),
+  using a `null` response ID. They continue receiving subsequent messages.
+  Non-empty arrays are ignored; batch messages are not supported.
 
 Both carry ACP JSON-RPC messages. The examples below use the v1 lifecycle
 (`initialize` → session methods → close). The
@@ -176,7 +180,7 @@ app = Starlette(routes=[Mount("/agents", app=acp_app)], lifespan=lifespan)
 With `path="/rpc"`, the mounted endpoint is `/agents/rpc`. Use `path="/"` to
 serve ACP at the mount root (`/agents/`).
 
-For the connection registry and stream routing, see [Transport architecture](../../explanation/transports.md).
+For message routing and connection lifetimes, see [Transport behavior](../../explanation/transports.md).
 
 ### Server API
 
@@ -224,5 +228,5 @@ application serving the endpoint.
 
 - `Last-Event-ID` / SSE resumability and message sequencing.
 - Client-side automatic reconnect/backoff.
-- Batch JSON-RPC (the server returns `501`).
+- Batch JSON-RPC (HTTP returns `501`; WebSocket ignores non-empty arrays).
 - `Acp-Protocol-Version` header enforcement.

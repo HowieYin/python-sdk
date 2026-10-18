@@ -18,7 +18,7 @@ nav:
       - Accumulate session state: how-to/session-state.md
   - Explanation:
       - Roles and session lifecycle: explanation/lifecycle.md
-      - Transport architecture: explanation/transports.md
+      - Transport behavior: explanation/transports.md
   - Reference:
       - Core API: reference/api.md
       - Protocol features and cancellation: reference/protocol.md
